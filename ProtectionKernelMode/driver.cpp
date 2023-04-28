@@ -21,10 +21,10 @@ void Log(const char* text, ...) {
 	va_list(args);
 	va_start(args, text);
 
-#if defined(dbgmode)
-	vDbgPrintExWithPrefix("[ProtectionDrv] ", 0, 0, text, args);
-#endif
-
+	#if defined(dbgmode)
+		vDbgPrintExWithPrefix("[ProtectionDrv] ", 0, 0, text, args);
+	#endif
+	
 	va_end(args);
 }
 
