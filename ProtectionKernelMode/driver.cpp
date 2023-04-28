@@ -77,8 +77,7 @@ bool protectProcess(int PID) {
 			return FALSE;
 		}
 
-		uint8_t* eprocess = (uint8_t*)process;
-		uint8_t* processPPL = eprocess + ppOffset.protection;
+		uint8_t* processPPL = (uint8_t*)process + ppOffset.protection;
 		if (WIN10 || WIN11) {
 			PS_PROTECTION protection;
 			protection.Flags.Signer = PsProtectedSignerWinSystem;
