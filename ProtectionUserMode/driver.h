@@ -5,7 +5,7 @@ constexpr ULONG requestProtect = CTL_CODE(FILE_DEVICE_UNKNOWN, 0x1337, METHOD_BU
 class drvManager {
 	HANDLE drvHandle = nullptr;
 
-	struct info_t {
+	struct commStruct {
 		UINT64 pid = 0;
 		UINT64 status = 0;
 	};
@@ -16,13 +16,12 @@ public:
 	}
 
 	bool ProtectProcess(int PID) {
-		info_t info;
+		commStruct buffer;
+		buffer.pid = PID;
 
-		info.pid = PID;
+		DeviceIoControl(drvHandle, requestProtect, &buffer, sizeof(buffer), &buffer, sizeof(buffer), nullptr, nullptr);
 
-		DeviceIoControl(drvHandle, requestProtect, &info, sizeof(info), &info, sizeof(info), nullptr, nullptr);
-
-		return info.status;
+		return buffer.status;
 	}
 
 	~drvManager() {

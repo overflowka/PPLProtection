@@ -23,10 +23,13 @@ int getPID(const char* name) {
 int main() {
 	auto driver = new drvManager("\\\\.\\ProtectionDrv");
 
-	int pid = getPID("Notepad.exe");
+	int pid = getPID("notepad.exe");
 
-	if (driver->ProtectProcess(pid)) printf("Successfully protected %d!\n", pid);
-	else printf("Failed to protect %d!\n", pid);
+	if (driver->ProtectProcess(pid)) 
+		printf("Successfully protected %d!\n", pid);
+	else 
+		printf("Failed to protect %d!\n", pid);
 
 	_getch();
+	return 0;
 }

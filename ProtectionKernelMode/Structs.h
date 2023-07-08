@@ -1,16 +1,22 @@
 #include <cstdint>
 
-#define WIN10 10
-#define WIN11 11
+enum winVersions {
+	WIN10 = 10,
+	WIN11 = 11
+};
 
-#define WIN10_19H1 18362
-#define WIN10_19H2 18363
-#define WIN10_20H1 19041
-#define WIN10_20H2 19042
-#define WIN10_21H1 19043
-#define WIN10_21H2 19044
-#define WIN11_22H2 22621
-#define WINDOWS_11 22000
+enum winBuilds {
+	WIN10_19H1 = 18362,
+	WIN10_19H2 = 18363,
+
+	WIN10_20H1 = 19041,
+	WIN10_20H2 = 19042,
+	WIN10_21H1 = 19043,
+	WIN10_21H2 = 19044,
+	WIN10_22H2 = 19045,
+
+	WIN11_22H2 = 22000
+};
 
 typedef union _PS_PROTECTION {
 	UCHAR Level;
@@ -41,6 +47,9 @@ typedef enum _PS_PROTECTED_TYPE {
 	PsProtectedTypeMax = 3
 } PS_PROTECTED_TYPE;
 
-struct pplOffset {
-	uint64_t protection;
+uint64_t g_pplOffset;
+
+struct commStruct {
+	UINT64 pid = 0;
+	UINT64 status = 0;
 };

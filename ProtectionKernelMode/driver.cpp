@@ -4,115 +4,123 @@
 
 constexpr ULONG requestProtect = CTL_CODE(FILE_DEVICE_UNKNOWN, 0x1337, METHOD_BUFFERED, FILE_SPECIAL_ACCESS);
 
-#define dbgmode
-
 extern "C" {
 	NTKERNELAPI NTSTATUS IoCreateDriver(PUNICODE_STRING DriverName, PDRIVER_INITIALIZE InitializationFunction);
 }
 
-pplOffset ppOffset;
-
-struct info_t {
-	UINT64 pid = 0;
-	UINT64 status = 0;
-};
-
+#define dbgmode
+/*
+	@brief DbgPrintEx but with tag
+	@param text
+	@param ...
+	@return void DbgPrintEx(0, 0, "[ProtectionDrv] ", text, args);
+*/
 void Log(const char* text, ...) {
+#if defined(dbgmode)
 	va_list(args);
 	va_start(args, text);
 
-	#if defined(dbgmode)
-		vDbgPrintExWithPrefix("[ProtectionDrv] ", 0, 0, text, args);
-	#endif
-	
+	vDbgPrintExWithPrefix("[ProtectionDrv] ", 0, 0, text, args);
+
 	va_end(args);
+#endif
 }
 
-int getWindowsNumber() {
-	RTL_OSVERSIONINFOW lpVersionInfo{ 0 };
-	lpVersionInfo.dwOSVersionInfoSize = sizeof(RTL_OSVERSIONINFOW);
-
-	RtlGetVersion(&lpVersionInfo);
-
-	if (lpVersionInfo.dwBuildNumber >= WINDOWS_11) return WIN11;
-
-	else if (lpVersionInfo.dwBuildNumber >= WIN10_19H1
-		&& lpVersionInfo.dwBuildNumber <= WIN10_21H2) return WIN10;
-}
-
+/*
+	@brief Simply sets the offset for the PPL in g_pplOffset
+	@return bool
+*/
 bool getOffset() {
 	RTL_OSVERSIONINFOW lpVersionInfo{ 0 };
 	lpVersionInfo.dwOSVersionInfoSize = sizeof(RTL_OSVERSIONINFOW);
 
 	RtlGetVersion(&lpVersionInfo);
 
-	if (lpVersionInfo.dwBuildNumber == WINDOWS_11
-		|| lpVersionInfo.dwBuildNumber == WIN11_22H2
-		|| lpVersionInfo.dwBuildNumber == WIN10_21H1
-		|| lpVersionInfo.dwBuildNumber == WIN10_21H2
-		|| lpVersionInfo.dwBuildNumber == WIN10_20H2
-		|| lpVersionInfo.dwBuildNumber == WIN10_20H1) ppOffset.protection = 0x87a;
+	Log("lpVersionInfo.dwBuildNumber -> %d\n", lpVersionInfo.dwBuildNumber);
 
-	else if (lpVersionInfo.dwBuildNumber == WIN10_19H2
-		|| lpVersionInfo.dwBuildNumber == WIN10_19H1) ppOffset.protection = 0x6fa;
+	if (lpVersionInfo.dwBuildNumber >= WIN10_20H1) {
+        g_pplOffset = 0x87a;
+    } else if (lpVersionInfo.dwBuildNumber <= WIN10_19H2) {
+        g_pplOffset = 0x6fa;
+    } else {
+		Log("%s: Your Windows version is not supported!\n", __FUNCTION__);
+        return false;
+    }
 
-	else return false;
+	Log("g_pplOffset -> 0x%x", g_pplOffset);
+
+	// lmao if else if else ...
 
 	return true;
 }
 
+/*	
+	@brief Protects a process by setting its protection level to WinSystem 
+	@param PID 
+	@return bool
+*/
 bool protectProcess(int PID) {
 	PEPROCESS process;
 	__try {
 		NTSTATUS status = PsLookupProcessByProcessId((HANDLE)PID, &process);
-		if (status != STATUS_SUCCESS) {
-			if (status == STATUS_INVALID_PARAMETER) Log("The PID is invalid.\n");
-			if (status == STATUS_INVALID_CID) Log("The CID is invalid.\n");
+		if (!NT_SUCCESS(status)) {
+			if (status == STATUS_INVALID_PARAMETER) 
+				Log("The PID is invalid.\n");
+				
+			if (status == STATUS_INVALID_CID) 
+				Log("The CID is invalid.\n");
 
-			return FALSE;
+			return false;
 		}
 
-		if (!getOffset()) {
-			Log("Windows version is not supported!\n");
-			return FALSE;
+		if (!g_pplOffset) {
+			Log("Obtaining offset...\n");
+			if (!getOffset())
+				return false;
 		}
 
-		uint8_t* processPPL = (uint8_t*)process + ppOffset.protection;
+		uint8_t* processPPL = reinterpret_cast<uint8_t*>(process) + g_pplOffset;
 		if (WIN10 || WIN11) {
-			PS_PROTECTION protection;
+			PS_PROTECTION protection { };
 			protection.Flags.Signer = PsProtectedSignerWinSystem;
 			protection.Flags.Type = PsProtectedTypeProtected;
 			*processPPL = protection.Level;
 		}
-		else return FALSE;
+		else 
+			return false;
 	}
 
 	__except (EXCEPTION_EXECUTE_HANDLER) {
-		return FALSE;
+		return false;
 	}
 
 	ObDereferenceObject(process);
-	return TRUE;
+	return true;
 }
 
+/*
+	@brief Handles the IOCTL request
+	@param devObj (UNREFERENCED)
+	@param irp
+	@return NTSTATUS
+*/
 NTSTATUS IoControl(PDEVICE_OBJECT devObj, PIRP irp) {
 	UNREFERENCED_PARAMETER(devObj);
 
 	auto stack = IoGetCurrentIrpStackLocation(irp);
-	auto buffer = (info_t*)irp->AssociatedIrp.SystemBuffer;
+	auto buffer = reinterpret_cast<commStruct*>(irp->AssociatedIrp.SystemBuffer);
 
 	if (stack) {
-		if (buffer && sizeof(*buffer) >= sizeof(info_t)) {
+		if (buffer && sizeof(*buffer) >= sizeof(commStruct)) {
 			const auto ctlCode = stack->Parameters.DeviceIoControl.IoControlCode;
 			if (ctlCode == requestProtect) {
-				if (protectProcess(buffer->pid)) {
+				bool status = protectProcess(buffer->pid);
+				buffer->status = status;
+
+				if (status) 
 					Log("Successfully protected %d!\n", buffer->pid);
-					buffer->status = 1;
-				}
-				else {
+				else
 					Log("Failed to protect %d!\n", buffer->pid);
-					buffer->status = 0;
-				}
 			}
 		}
 	}
@@ -122,6 +130,12 @@ NTSTATUS IoControl(PDEVICE_OBJECT devObj, PIRP irp) {
 	return STATUS_SUCCESS;
 }
 
+/*
+	@brief Handles the IRP_MJ_CREATE and IRP_MJ_CLOSE requests
+	@param devObj (UNREFERENCED)
+	@param irp
+	@return NTSTATUS
+*/
 NTSTATUS IoCreateClose(PDEVICE_OBJECT devObj, PIRP irp) {
 	UNREFERENCED_PARAMETER(devObj);
 
@@ -129,23 +143,36 @@ NTSTATUS IoCreateClose(PDEVICE_OBJECT devObj, PIRP irp) {
 	return irp->IoStatus.Status;
 }
 
+/*
+	@brief Real driver entry point
+	@param driverObj
+	@param registeryPath (UNREFERENCED)
+	@return NTSTATUS
+*/
 NTSTATUS RealEntry(PDRIVER_OBJECT driverObj, PUNICODE_STRING registeryPath) {
 	UNREFERENCED_PARAMETER(registeryPath);
 
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	UNICODE_STRING devName, symLink;
 	PDEVICE_OBJECT devObj;
 
+	Log("RealEntry address -> %p", &RealEntry);
+
 	RtlInitUnicodeString(&devName, L"\\Device\\ProtectionDrv");
-	auto status = IoCreateDevice(driverObj, 0, &devName, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &devObj);
-	if (!NT_SUCCESS(status)) {
-		return status;
+	ntStatus = IoCreateDevice(driverObj, 0, &devName, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &devObj);
+
+	if (!NT_SUCCESS(ntStatus)) {
+		Log("%s: IoCreateDevice failed with status 0x%08X\n", __FUNCTION__, ntStatus);
+		return ntStatus;
 	}
 
 	RtlInitUnicodeString(&symLink, L"\\DosDevices\\ProtectionDrv");
-	status = IoCreateSymbolicLink(&symLink, &devName);
-	if (!NT_SUCCESS(status)) {
+	ntStatus = IoCreateSymbolicLink(&symLink, &devName);
+
+	if (!NT_SUCCESS(ntStatus)) {
+		Log("%s: IoCreateSymbolicLink failed with status 0x%08X\n", __FUNCTION__, ntStatus);
 		IoDeleteDevice(devObj);
-		return status;
+		return ntStatus;
 	}
 
 	SetFlag(devObj->Flags, DO_BUFFERED_IO);
@@ -157,17 +184,25 @@ NTSTATUS RealEntry(PDRIVER_OBJECT driverObj, PUNICODE_STRING registeryPath) {
 
 	ClearFlag(devObj->Flags, DO_DEVICE_INITIALIZING);
 
-	return status;
+	Log("Driver initialized successfully!");
+
+	return ntStatus;
 }
 
 NTSTATUS EntryPoint(PDRIVER_OBJECT drvObj, PUNICODE_STRING registryPath) {
 	UNREFERENCED_PARAMETER(drvObj);
 	UNREFERENCED_PARAMETER(registryPath);
 
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	UNICODE_STRING drvName;
 
-	RtlInitUnicodeString(&drvName, L"\\Driver\\ProtectionDrv");
-	IoCreateDriver(&drvName, &RealEntry);
+	Log("EntryPoint address -> %p", &EntryPoint);
 
-	return STATUS_SUCCESS;
+	RtlInitUnicodeString(&drvName, L"\\Driver\\ProtectionDrv");
+	ntStatus = IoCreateDriver(&drvName, &RealEntry);
+
+	if (!NT_SUCCESS(ntStatus))
+		Log("%s: IoCreateDriver failed with status 0x%08X\n", __FUNCTION__, ntStatus);
+
+	return ntStatus;
 }
