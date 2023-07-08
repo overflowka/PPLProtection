@@ -39,18 +39,18 @@ bool getOffset() {
 	Log("lpVersionInfo.dwBuildNumber -> %d\n", lpVersionInfo.dwBuildNumber);
 
 	if (lpVersionInfo.dwBuildNumber >= WIN10_20H1) {
-        g_pplOffset = 0x87a;
-    } else if (lpVersionInfo.dwBuildNumber <= WIN10_19H2) {
-        g_pplOffset = 0x6fa;
-    } else {
+		g_pplOffset = 0x87a;
+	} else if (lpVersionInfo.dwBuildNumber <= WIN10_19H2) {
+		g_pplOffset = 0x6fa;
+	} else {
 		Log("%s: Your Windows version is not supported!\n", __FUNCTION__);
-        return false;
-    }
+		return false;
+	}
 
 	Log("g_pplOffset -> 0x%x", g_pplOffset);
 
 	// lmao if else if else ...
-
+	
 	return true;
 }
 
